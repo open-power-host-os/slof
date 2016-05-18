@@ -126,6 +126,7 @@
 \ Setup a prefetchable 64bit BAR and return its size
 : assign-mem64-bar ( bar-addr -- 8 )
         dup pci-bar-size-mem64         \ fetch size
+        10000 #aligned                  \ align size to minimum 64K (page size)
         pci-next-mem64 @ 0 = IF          \ Check if we have 64-bit memory range
 	    pci-next-mem
 	ELSE
@@ -137,6 +138,7 @@
 \ Setup a prefetchable 32bit BAR and return its size
 : assign-mem32-bar ( bar-addr -- 4 )
         dup pci-bar-size-mem32          \ fetch size
+        10000 #aligned                  \ align size to minimum 64K (page size)
         pci-next-mem                    \ var to change
         assign-bar-value32              \ and set it all
 ;
@@ -144,6 +146,7 @@
 \ Setup a non-prefetchable 64bit BAR and return its size
 : assign-mmio64-bar ( bar-addr -- 8 )
         dup pci-bar-size-mem64          \ fetch size
+        10000 #aligned                  \ align size to minimum 64K (page size)
         pci-next-mem64 @ 0 = IF          \ Check if we have 64-bit memory range
 	    pci-next-mmio
 	ELSE
@@ -155,6 +158,7 @@
 \ Setup a non-prefetchable 32bit BAR and return its size
 : assign-mmio32-bar ( bar-addr -- 4 )
         dup pci-bar-size-mem32          \ fetch size
+        10000 #aligned                  \ align size to minimum 64K (page size)
         pci-next-mmio                   \ var to change
         assign-bar-value32              \ and set it all
 ;
@@ -169,6 +173,7 @@
 \ Setup an Expansion ROM bar
 : assign-rom-bar ( bar-addr -- )
         dup pci-bar-size-rom            \ fetch size
+        10000 #aligned                  \ align size to minimum 64K (page size)
         dup IF                          \ IF size > 0
                 over >r                 \ | save bar addr for enable
                 pci-next-mmio           \ | var to change
