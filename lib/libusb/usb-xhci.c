@@ -25,6 +25,23 @@
 #define dprintf(_x ...)
 #endif
 
+struct port_state ps_array_usb2[] = {
+	{1, 0, 0, 0, PORTSC_PLS_U0, "ERROR"}
+};
+
+struct port_state ps_array_usb3[] = {
+	{0, 0, 0, 0, PORTSC_PLS_DISABLED, "Powered-OFF"},
+	{1, 0, 0, 0, PORTSC_PLS_POLLING,  "Polling"},
+	{1, 0, 0, 0, PORTSC_PLS_U0,       "Polling"},
+	{1, 0, 0, 0, PORTSC_PLS_RXDETECT, "***  Disconnected ***"},
+	{1, 0, 0, 0, PORTSC_PLS_DISABLED, "Disabled"},
+	{1, 0, 0, 0, PORTSC_PLS_INACTIVE, "Error"},
+	{1, 0, 0, 0, PORTSC_PLS_TEST_MODE,"Loopback"},
+	{1, 0, 0, 0, PORTSC_PLS_COMP_MODE,"Compliancek"},
+	{1, 1, 0, 1, PORTSC_PLS_U0,       "******  Reset  ******"},
+	{1, 1, 1, 0, PORTSC_PLS_U0,       "****** Enabled ******"},
+};
+
 static void dump_xhci_regs(struct xhci_hcd *xhcd)
 {
 #ifdef XHCI_DEBUG
@@ -511,7 +528,8 @@ static uint32_t usb_control_max_packet(uint32_t speed)
 	return max_packet;
 }
 
-static bool xhci_alloc_dev(struct xhci_hcd *xhcd, uint32_t slot_id, uint32_t port)
+static bool xhci_alloc_dev(struct xhci_hcd *xhcd, struct usb_dev *hub,
+			   uint32_t slot_id, uint32_t port, uint32_t slotspeed)
 {
 	struct usb_dev *dev;
 	struct xhci_dev *xdev;
@@ -520,7 +538,13 @@ static bool xhci_alloc_dev(struct xhci_hcd *xhcd, uint32_t slot_id, uint32_t por
 	struct xhci_ep_ctx *ep0;
 	uint32_t ctx_size, val;
 	uint16_t max_packet;
-	uint32_t newport;
+	uint32_t newport, rootport;
+
+	if (slot_id > XHCI_CONFIG_MAX_SLOT) {
+		printf("USB3 slot ID %d is too high (max is %d)\n", slot_id,
+			XHCI_CONFIG_MAX_SLOT);
+		return false;
+	}
 
 	ctx_size = CTX_SIZE(xhcd->hcc_csz_64);
 	xdev = &xhcd->xdevs[slot_id];
@@ -541,10 +565,16 @@ static bool xhci_alloc_dev(struct xhci_hcd *xhcd, uint32_t slot_id, uint32_t por
 
 	/* Step 3 */
 	slot = xhci_get_slot_ctx(&xdev->in_ctx, ctx_size);
-	newport = port + 1;
-	val = LAST_CONTEXT(1) | SLOT_SPEED_SS | (newport << 16); /* FIXME speed, read from PS */
+	newport = rootport = port + 1;
+	val = newport & 0xf;
+	for (dev = hub; dev != NULL; dev = dev->hub) {
+		val = (val << 4) | (dev->port & 0xf);	/* Build route string */
+		rootport = dev->port;
+	}
+	val >>= 4;			/* Remove root hub ID from the string */
+	val |= LAST_CONTEXT(1) | slotspeed;
 	slot->field1 = cpu_to_le32(val);
-	slot->field2 = cpu_to_le32(ROOT_HUB_PORT(newport)); /* FIXME how to get port no */
+	slot->field2 = cpu_to_le32(ROOT_HUB_PORT(rootport));
 
 	/* Step 4 */
 	if (!xhci_alloc_seg(&xdev->control, XHCI_CONTROL_TRBS_SIZE, TYPE_CTRL)) {
@@ -606,6 +636,7 @@ static bool xhci_alloc_dev(struct xhci_hcd *xhcd, uint32_t slot_id, uint32_t por
 	dev->speed = USB_SUPER_SPEED;
 	dev->addr = USB_DEV_ADDRESS(slot->field4);
 	dev->port = newport;
+	dev->hub = hub;
 	dev->priv = xdev;
 	xdev->dev = dev;
 	if (usb_setup_new_device(dev, newport)) {
@@ -631,7 +662,8 @@ static void xhci_free_dev(struct xhci_dev *xdev)
 	xhci_free_ctx(&xdev->out_ctx, XHCI_CTX_BUF_SIZE);
 }
 
-static bool usb3_dev_init(struct xhci_hcd *xhcd, uint32_t port)
+bool usb3_dev_init(struct xhci_hcd *xhcd, struct usb_dev *hub, uint32_t port,
+		   uint32_t slotspeed)
 {
 	/* Device enable slot */
 	xhci_send_enable_slot(xhcd, port);
@@ -640,7 +672,7 @@ static bool usb3_dev_init(struct xhci_hcd *xhcd, uint32_t port)
 		return false;
 	}
 	dprintf("SLOT ID: %d\n", xhcd->slot_id);
-	if (!xhci_alloc_dev(xhcd, xhcd->slot_id, port)) {
+	if (!xhci_alloc_dev(xhcd, hub, xhcd->slot_id, port, slotspeed)) {
 		dprintf("Unable to allocate device\n");
 		return false;
 	}
@@ -718,7 +750,8 @@ static int xhci_port_scan(struct xhci_hcd *xhcd,
 				dprintf("Port reset complete %d\n", i);
 			}
 			print_port_status(prs);
-			if (!usb3_dev_init(xhcd, (i - (port_off - 1)))) {
+			if (!usb3_dev_init(xhcd, NULL, i - (port_off - 1),
+					   ((portsc >> 10) & 0xf) << 20)) {
 				dprintf("USB device initialization failed\n");
 			}
 		}
@@ -1017,9 +1050,9 @@ static void fill_setup_data(struct xhci_command_trb *cmd, void *data,
 	field1 = TRB_ADDR_LOW(data);
 	field2 = TRB_ADDR_HIGH(data);
 	field3 = size;
+	field4 = TRB_CMD_TYPE(TRB_DATA_STAGE);
 	if (dir)
-		field4 = TRB_DIR_IN;
-	field4 |= TRB_CMD_TYPE(TRB_DATA_STAGE);
+		field4 |= TRB_DIR_IN;
 	fill_trb_buff(cmd, field1, field2, field3, field4);
 }
 
@@ -1030,10 +1063,9 @@ static void fill_status_trb(struct xhci_command_trb *cmd, uint32_t dir)
 	field1 = 0;
 	field2 = 0;
 	field3 = 0;
+	field4 = TRB_CMD_TYPE(TRB_STATUS_STAGE) | TRB_IOC;
 	if (dir)
-		field4 = TRB_DIR_IN;
-
-	field4 |= TRB_CMD_TYPE(TRB_STATUS_STAGE) | TRB_IOC;
+		field4 |= TRB_DIR_IN;
 	fill_trb_buff(cmd, field1, field2, field3, field4);
 }
 
@@ -1409,11 +1441,12 @@ static struct usb_pipe* xhci_get_pipe(struct usb_dev *dev, struct usb_ep_descr *
 	new->dir = (ep->bEndpointAddress & 0x80) >> 7;
 	new->epno = ep->bEndpointAddress & 0x0f;
 
-	if (new->type == USB_EP_TYPE_INTR)
+	if (new->type == USB_EP_TYPE_INTR) {
 		if (!xhci_get_pipe_intr(new, xhcd, buf, len)) {
 			printf("usb-xhci: %s alloc_intr failed  %p\n",
 				__func__, new);
 		}
+	}
 	if (new->type == USB_EP_TYPE_BULK)
 		xhci_init_bulk_ep(dev, new);
 

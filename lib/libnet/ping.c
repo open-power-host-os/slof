@@ -10,15 +10,16 @@
  *     IBM Corporation - initial implementation
  *****************************************************************************/
 
-#include <netlib/ipv4.h>
-#include <netlib/dhcp.h>
-#include <netlib/ethernet.h>
+#include <unistd.h>
+#include <ipv4.h>
+#include <dhcp.h>
+#include <ethernet.h>
 #include <sys/socket.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <netapps/args.h>
+#include "args.h"
 #include "netapps.h"
 
 struct ping_args {
@@ -105,8 +106,7 @@ parse_args(const char *args, struct ping_args *ping_args)
 	return 0;
 }
 
-int
-ping(int argc, char *argv[])
+int ping(char *args_fs, int alen)
 {
 	short arp_failed = 0;
 	filename_ip_t fn_ip;
@@ -114,15 +114,20 @@ ping(int argc, char *argv[])
 	struct ping_args ping_args;
 	uint8_t own_mac[6];
 	uint32_t netmask;
+	char args[256];
 
 	memset(&ping_args, 0, sizeof(struct ping_args));
 
-	if (argc == 2) {
-		if (parse_args(argv[1], &ping_args)) {
-			usage();
-			return -1;
-		}
-	} else {
+	if (alen <= 0 && alen >= sizeof(args) - 1) {
+		usage();
+		return -1;
+	}
+
+	/* Convert forth string into NUL-terminated C-string */
+	memcpy(args, args_fs, alen);
+	args[alen] = 0;
+
+	if (parse_args(args, &ping_args)) {
 		usage();
 		return -1;
 	}
@@ -155,11 +160,11 @@ ping(int argc, char *argv[])
 
 	if (!ping_args.client_ip.integer) {
 		/* Get ip address for our mac address */
-		printf("  Requesting IP address via DHCP: ");
 		arp_failed = dhcp(0, &fn_ip, 30, F_IPV4);
 
 		if (arp_failed == -1) {
 			printf("\n  DHCP: Could not get ip address\n");
+			close(fn_ip.fd);
 			return -1;
 		}
 
@@ -176,13 +181,12 @@ ping(int argc, char *argv[])
 		set_ipv4_netmask(ping_args.netmask);
 
 		arp_failed = 1;
-		printf("  Own IP address: ");
 	}
 
 	// reinit network stack
 	set_ipv4_address(fn_ip.own_ip);
 
-	printf("%d.%d.%d.%d\n",
+	printf("  Own IP address: %d.%d.%d.%d\n",
 	       ((fn_ip.own_ip >> 24) & 0xFF), ((fn_ip.own_ip >> 16) & 0xFF),
 	       ((fn_ip.own_ip >> 8) & 0xFF), (fn_ip.own_ip & 0xFF));
 
@@ -206,10 +210,12 @@ ping(int argc, char *argv[])
 		receive_ether(fd_device);
 		if(pong_ipv4() == 0) {
 			printf("success\n");
+			close(fn_ip.fd);
 			return 0;
 		}
 	}
 
 	printf("failed\n");
+	close(fn_ip.fd);
 	return -1;
 }

@@ -16,13 +16,35 @@ ifndef TOP
 endif
 include $(TOP)/make.rules
 
-CFLAGS += -I../ -I../../../../lib/ -Wall -W
+CFLAGS += -I. -I.. -I../libc/include -I$(TOP)/include
 
-OBJS    = netboot.o ping.o args.o
+SRCS =	ethernet.c ipv4.c udp.c tcp.c dns.c bootp.c dhcp.c tftp.c \
+	ipv6.c dhcpv6.c icmpv6.c ndp.c netload.c ping.c args.c
 
-all: $(OBJS) 
+OBJS = $(SRCS:%.c=%.o)
+
+TARGET = ../libnet.a
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(AR) -rc $@ $(OBJS)
+	$(RANLIB) $@
 
 clean:
-	$(RM) -f *.o *.a *.i
+	$(RM) $(TARGET) $(OBJS)
 
-include $(TOP)/make.depend
+distclean: clean
+	$(RM) Makefile.dep
+
+
+# Rules for creating the dependency file:
+depend:
+	$(RM) Makefile.dep
+	$(MAKE) Makefile.dep
+
+Makefile.dep: Makefile
+	$(CC) -M $(CPPFLAGS) $(CFLAGS) $(SRCS) > Makefile.dep
+
+# Include dependency file if available:
+-include Makefile.dep

@@ -24,6 +24,9 @@ VARIABLE pci-max-io
 VARIABLE pci-next-mem64           \ prefetchable 64-bit memory mapped
 VARIABLE pci-max-mem64
 
+\ 0 to default to natural alignment
+0 VALUE pci-mem-bar-min-align
+
 \ Counter of busses found
 0 VALUE pci-bus-number
 \ Counter of devices found
@@ -221,6 +224,8 @@ DEFER func-pci-bridge-range-props
         dup pci-bridge-set-limits                       \ SetUp all Limit Registers
         drop                                            \ forget the config-addr
 ;
+DEFER func-pci-bridge-probe
+' pci-bridge-probe TO func-pci-bridge-probe
 
 \ set up the pci-device
 : pci-device-setup ( addr -- )

@@ -297,16 +297,23 @@ setup-puid
         CASE
             0 OF my-space pci-device-setup ENDOF  \ | set up the device
             1 OF my-space pci-bridge-setup ENDOF  \ | set up the bridge
-            dup OF my-space pci-htype@ pci-out ENDOF
+            dup OF my-space [char] ? pci-out ENDOF
         ENDCASE
         peer
     REPEAT drop
     get-parent set-node
 ;
 
-\ Landing routing to probe the popuated device tree
-: phb-pci-probe-bus ( busnr -- )
-    drop phb-pci-walk-bridge
+\ Similar to pci-bridge-probe, but without setting the secondary and
+\ subordinate bus numbers (since this has been done by QEMU already)
+: phb-pci-bridge-probe ( addr -- )
+    dup pci-bridge-set-bases                      \ Set up all Base Registers
+    dup func-pci-bridge-range-props               \ Set up temporary "range"
+    pci-device-vec-len 1+ TO pci-device-vec-len   \ increase the device-slot vector depth
+    pci-enable                                    \ enable mem/IO transactions
+    phb-pci-walk-bridge                           \ and walk the secondary bus
+    pci-device-vec-len 1- TO pci-device-vec-len   \ decrease the device-slot vector depth
+    pci-bridge-set-limits                         \ Set up all Limit Registers
 ;
 
 \ Stub routine, as qemu has enumerated, we already have the device
@@ -324,11 +331,17 @@ setup-puid
    my-puid TO puid                  \ Set current puid
    phb-parse-ranges
    1 TO pci-hotplug-enabled
+   s" qemu,mem-bar-min-align" get-node get-property 0= IF
+       decode-int TO pci-mem-bar-min-align
+       2drop
+   ELSE
+       10000 TO pci-mem-bar-min-align
+   THEN
    s" qemu,phb-enumerated" get-node get-property 0<> IF
        1 0 (probe-pci-host-bridge)
    ELSE
        2drop
-       ['] phb-pci-probe-bus TO func-pci-probe-bus
+       ['] phb-pci-bridge-probe TO func-pci-bridge-probe
        ['] phb-pci-device-props TO func-pci-device-props
        phb-pci-walk-bridge          \ PHB device tree is already populated.
    THEN

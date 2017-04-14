@@ -10,21 +10,22 @@
  *     IBM Corporation - initial implementation
  *****************************************************************************/
 
-#include <netlib/tftp.h>
-#include <netlib/ethernet.h>
-#include <netlib/dhcp.h>
-#include <netlib/dhcpv6.h>
-#include <netlib/ipv4.h>
-#include <netlib/ipv6.h>
-#include <netlib/dns.h>
+#include <unistd.h>
+#include <tftp.h>
+#include <ethernet.h>
+#include <dhcp.h>
+#include <dhcpv6.h>
+#include <ipv4.h>
+#include <ipv6.h>
+#include <dns.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
 #include <sys/socket.h>
-#include <netapps/args.h>
 #include <libbootmsg/libbootmsg.h>
-#include <of.h>
+#include <helpers.h>
+#include "args.h"
 #include "netapps.h"
 
 #define IP_INIT_DEFAULT 5
@@ -327,7 +328,8 @@ parse_args(const char *arg_str, obp_tftp_args_t *obp_tftp_args)
  * @return               ZERO - IP and configuration info obtained;
  *                       NON ZERO - error condition occurs.
  */
-int dhcp(char *ret_buffer, filename_ip_t * fn_ip, unsigned int retries, int flags)
+int dhcp(char *ret_buffer, struct filename_ip *fn_ip, unsigned int retries,
+	 int flags)
 {
 	int i = (int) retries+1;
 	int rc = -1;
@@ -384,14 +386,11 @@ static void seed_rng(uint8_t mac[])
 	srand(seed);
 }
 
-int
-netboot(int argc, char *argv[])
+int netload(char *buffer, int len, char *ret_buffer, int huge_load,
+	    int block_size, char *args_fs, int alen)
 {
 	char buf[256];
 	int rc;
-	int len = strtol(argv[2], 0, 16);
-	char *buffer = (char *) strtol(argv[1], 0, 16);
-	char *ret_buffer = (char *) strtol(argv[3], 0, 16);
 	filename_ip_t fn_ip;
 	int fd_device;
 	tftp_err_t tftp_err;
@@ -401,8 +400,6 @@ netboot(int argc, char *argv[])
 			     0x00, 0x00, 0x00, 0x00,
 			     0x00, 0x00, 0x00, 0x00, 
 			     0x00, 0x00, 0x00, 0x00 };
-	int huge_load = strtol(argv[4], 0, 10);
-	int32_t block_size = strtol(argv[5], 0, 10);
 	uint8_t own_mac[6];
 
 	puts("\n Initializing NIC");
@@ -456,8 +453,16 @@ netboot(int argc, char *argv[])
 
 	seed_rng(own_mac);
 
-	if (argc > 6) {
-		parse_args(argv[6], &obp_tftp_args);
+	if (alen > 0) {
+		char args[256];
+		if (alen > sizeof(args) - 1) {
+			puts("ERROR: Parameter string is too long.");
+			return -7;
+		}
+		/* Convert forth string into NUL-terminated C-string */
+		strncpy(args, args_fs, alen);
+		args[alen] = 0;
+		parse_args(args, &obp_tftp_args);
 		if(obp_tftp_args.bootp_retries - rc < DEFAULT_BOOT_RETRIES)
 			obp_tftp_args.bootp_retries = DEFAULT_BOOT_RETRIES;
 		else
@@ -566,6 +571,7 @@ netboot(int argc, char *argv[])
 		bootmsg_error(0x3001, &buf[7]);
 
 		write_mm_log(buf, strlen(buf), 0x91);
+		close(fn_ip.fd);
 		return -101;
 	}
 
@@ -590,6 +596,7 @@ netboot(int argc, char *argv[])
 		bootmsg_error(0x3002, &buf[7]);
 
 		write_mm_log(buf, strlen(buf), 0x91);
+		close(fn_ip.fd);
 		return -102;
 	}
 	if (rc == -4 || rc == -3) {
@@ -597,6 +604,7 @@ netboot(int argc, char *argv[])
 		bootmsg_error(0x3008, &buf[7]);
 
 		write_mm_log(buf, strlen(buf), 0x91);
+		close(fn_ip.fd);
 		return -107;
 	}
 
@@ -634,6 +642,8 @@ netboot(int argc, char *argv[])
 
 	if(obp_tftp_args.ip_init == IP_INIT_DHCP)
 		dhcp_send_release(fn_ip.fd);
+
+	close(fn_ip.fd);
 
 	if (rc > 0) {
 		printf("  TFTP: Received %s (%d KBytes)\n", fn_ip.filename,

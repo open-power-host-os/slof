@@ -10,20 +10,30 @@
  *     IBM Corporation - initial implementation
  *****************************************************************************/
 
-#ifndef _NETAPPS_H_
-#define _NETAPPS_H_
+#include <unistd.h>
 
-#include <netlib/tftp.h>
+#define HEAP_SIZE 0x200000
 
-#define F_IPV4	4
-#define F_IPV6	6
 
-int netboot(int argc, char *argv[]);
-int netsave(int argc, char *argv[]);
-int bcmflash(int argc, char *argv[]);
-int mac_sync(int argc, char *argv[]);
-int net_eeprom_version( void );
-int ping(int argc, char *argv[]);
-int dhcp(char *ret_buffer, filename_ip_t * fn_ip, unsigned int retries, int flags);
+static char heap[HEAP_SIZE];
+static char *actptr;
 
-#endif
+void *sbrk(int increment)
+{
+	char *oldptr;
+
+	/* Called for the first time? Then init the actual pointer */
+	if (!actptr) {
+		actptr = heap;
+	}
+
+	if (actptr + increment > heap + HEAP_SIZE) {
+		/* Out of memory */
+		return (void *)-1;
+	}
+
+	oldptr = actptr;
+	actptr += increment;
+
+	return oldptr;
+}

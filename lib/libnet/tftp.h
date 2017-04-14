@@ -15,14 +15,14 @@
 #define _TFTP_H_
 
 #include <stdint.h>
-#include <netlib/ipv6.h>
+#include "ipv6.h"
 
 struct tftphdr {
 	int16_t th_opcode;
 	uint16_t th_data;
 };
 
-typedef struct {
+struct filename_ip {
 	uint32_t own_ip;
 	ip6_addr_t own_ip6;
 	uint32_t server_ip;
@@ -30,7 +30,8 @@ typedef struct {
 	ip6_addr_t dns_ip6;
 	int8_t filename[256];
 	int    fd;
-} __attribute__ ((packed)) filename_ip_t ;
+} __attribute__ ((packed));
+typedef struct filename_ip filename_ip_t;
 
 typedef struct {
 	uint32_t bad_tftp_packets;
