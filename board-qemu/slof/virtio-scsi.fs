@@ -20,8 +20,6 @@ FALSE CONSTANT virtio-scsi-debug
 : decode-unit 2 hex64-decode-unit ;
 : encode-unit 2 hex64-encode-unit ;
 
-FALSE VALUE initialized?
-
 virtio-setup-vd VALUE virtiodev
 
 STRUCT \ virtio-scsi-config
@@ -174,13 +172,28 @@ scsi-close        \ no further scsi words required
     THEN
 ;
 
-: shutdown ( -- )
-    initialized? IF
-       my-phandle node>path open-dev ?dup IF
-          virtiodev virtio-scsi-shutdown
-          close-dev
-       THEN
-       FALSE to initialized?
+0 VALUE open-count
+
+: open ( -- )
+    open-count 0= IF
+        open 0= IF false EXIT THEN
+        virtiodev virtio-scsi-init
+        0= IF
+            1 to open-count true
+        ELSE ." virtio-scsi initialization failed !" cr false THEN
+    ELSE
+        open-count 1 + to open-count
+        true
+    THEN
+;
+
+: close ( -- )
+    open-count 0> IF
+        open-count 1 - dup to open-count
+        0= IF
+            virtiodev virtio-scsi-shutdown
+            close
+        THEN
     THEN
 ;
 
@@ -190,13 +203,8 @@ scsi-close        \ no further scsi words required
     my-self >r
     dup to my-self
     \ Scan the VSCSI bus:
-    virtiodev virtio-scsi-init
-    0= IF
-	scsi-find-disks
-	setup-alias
-	TRUE to initialized?
-	['] shutdown add-quiesce-xt
-    THEN
+    scsi-find-disks
+    setup-alias
     \ Close the temporary instance:
     close-node
     r> to my-self
